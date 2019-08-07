@@ -4,6 +4,9 @@ Based on pytradfri library to create cron updates for Ikea Trådfri lights.
 
 A lot can be updated, this is the first working copy. This is not intended to work out of the box, please read this readme and change settings accordingly!
 
+Requirements:
+1. https://www.crummy.com/software/BeautifulSoup/bs4/doc/ (apt install python3-bs4)
+2. https://github.com/ggravlingen/pytradfri (pip3 install pytradfri[async])
 
 How to use:
 
