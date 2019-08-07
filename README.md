@@ -16,5 +16,8 @@ How to use:
 4. One hour timedelta hard coded as of now
 5. Change tradfri-lightcontrol.py to only control lights you want to (All lights in example)
 6. Change config file location
+7. Create cron file (/etc/cron.d/tradfri-updatesun) with the following line to update sunrise and sunset every 3 days
+      0 0 */3 * * root /usr/bin/python3 /home/tradfri/tradfri-updatesun.py --deltaminutes=45 --deltahours=0
+
 
 Note: Change /usr/local/lib/python3.6/dist-packages/pytradfri/api/libcoap_api.py line 35 to coap-client full path, example: '/usr/local/bin/coap-client'
