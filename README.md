@@ -13,10 +13,9 @@ How to use:
 1. Download and test pytradfri by ggravlingen here: https://github.com/ggravlingen/pytradfri
 2. Download tradfri-lightcontrol.py and tradfri-updatesun.py
 3. Change sunsire and sunset source URL
-4. One hour timedelta hard coded as of now
-5. Change tradfri-lightcontrol.py to only control lights you want to (All lights in example)
-6. Change config file location
-7. Create cron file (/etc/cron.d/tradfri-updatesun) with the following line to update sunrise and sunset every 3 days
+4. Change tradfri-lightcontrol.py to only control lights you want to (All lights in example)
+5. Change config file location
+6. Create cron file (/etc/cron.d/tradfri-updatesun) with the following line to update sunrise and sunset every 3 days
       0 0 */3 * * root /usr/bin/python3 /home/tradfri/tradfri-updatesun.py --deltaminutes=45 --deltahours=0
 
 
