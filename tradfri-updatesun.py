@@ -1,43 +1,98 @@
 #!/usr/bin/env python3
 import sys
 import os
-from typing import Dict, Any
-
-import requests
-import datetime
+import urllib.request, requests, json
+import datetime, time
 import argparse
-import time
 from datetime import timedelta
+from tzlocal import get_localzone # $ pip install tzlocal
 import logging
 from pytradfri.util import load_json
-from bs4 import BeautifulSoup as BS
-
-#Define Configuration file, use full path to file
-CONFIG_FILE = '/home/tradfri/tradfri_standalone_psk.conf'
-logging.basicConfig(filename='/var/log/tradfri-cron.log', filemode='a', format='%(asctime)s | %(levelname)s - %(message)s',level=logging.DEBUG)
+import pip
+from pip.req import parse_requirements
+import pkg_resources
+from pkg_resources import DistributionNotFound, VersionConflict
 
 #Parse arguments passed to python script
 parser = argparse.ArgumentParser()
+parser.add_argument('-c','--civil', action='store_true', dest='civil', default=False,
+                    help='Use Civil Twilight, Dawn, and Dusk')
+parser.add_argument('-n','--nautical', action='store_true', dest='nautical', default=False,
+                    help='Use Nautical Twilight, Dawn, and Dusk')
 parser.add_argument('--deltahours', dest="deltahours", type=int,
-                    default=1, help='Timedelta in hours (Default: 1)')
+                    default=0, help='Timedelta in hours (Default: 0)')
 parser.add_argument('--deltaminutes', dest="deltaminutes", type=int,
                     default=0, help='Timedelta in minutes (Default: 0)')
 args = parser.parse_args()
+
+# Define logging file location and format
+logging.basicConfig(filename='/var/log/tradfri-cron.log', filemode='a', format='%(asctime)s | %(levelname)s - %(message)s',level=logging.DEBUG)
+# Define Configuration file, use full path to file
+CONFIG_FILE = '/home/tradfri/tradfri_standalone_psk.conf'
+
+def check_dependencies():
+    """
+    Checks to see if the python dependencies are fullfilled.
+    If check passes return 0. Otherwise print error and return 1
+    """
+    # dependencies can be any iterable with strings,
+    # e.g. file line-by-line iterator
+    dependencies = [
+        'tzlocal>=0.6.1'
+    ]
+    session = pip.download.PipSession()
+    try:
+        pkg_resources.working_set.require(dependencies)
+    except VersionConflict as e:
+        try:
+            print("{} was found on your system, "
+                  "but {} is required.\n".format(e.dist, e.req))
+            return 1
+        except AttributeError:
+            print(e)
+            return 1
+    except DistributionNotFound as e:
+        print(e)
+        return 1
+    return 0
+
+check_dependencies()
+
+if os.path.isfile(CONFIG_FILE):
+    logging.info(
+        'Configuration file %s found' %(CONFIG_FILE))
+else:
+    logging.warning('Pytradfri configuration file %s not found!' %(CONFIG_FILE))
+    while True:
+        try:
+            CONFIG_FILE = input("Enter pytradfri configuration location: ")
+            if os.path.isfile(CONFIG_FILE):
+                print("File %s found" %(CONFIG_FILE))
+                break
+        except err:
+            logging.warning('Pytradfri configuration file %s not found!' %(CONFIG_FILE))
 
 # Assign configuration variables.
 # The configuration check takes care they are present.
 # Select first conf key as the host (Assuming we only have one)
 conf = load_json(CONFIG_FILE)
 host = list(conf)[0]
+#Get current
+data = urllib.request.urlopen("https://api.sunrise-sunset.org/json?lat=60.454510&lng=22.264824&formatted=0").read()
+json = json.loads(data)
+if args.nautical:
+    sunset = datetime.datetime.strptime(json["results"]["nautical_twilight_end"][:-6]+'+0000', '%Y-%m-%dT%H:%M:%S%z').astimezone(get_localzone())
+elif args.civil:
+    sunset = datetime.datetime.strptime(json["results"]["civil_twilight_end"][:-6]+'+0000', '%Y-%m-%dT%H:%M:%S%z').astimezone(get_localzone())
+else:
+    sunset = datetime.datetime.strptime(json["results"]["sunset"][:-6]+'+0000', '%Y-%m-%dT%H:%M:%S%z').astimezone(get_localzone())
 
-# Request sunrise and sunset source webpage
-r = requests.get('https://ilmatieteenlaitos.fi/saa/Turku', verify=True)
-soup = BS(r.text, "html.parser")
-# Use Beutiful Soup to get Sunrise and Sunset values, split with : to get hour and minute
-sunrise: Dict[str, int] = {"hour": list(map(int,((soup.find('span', {"class": "sunrise"}).text).split(":"))))[0],
-           "minute": list(map(int,((soup.find('span', {"class": "sunrise"}).text).split(":"))))[1]}
-sunset: Dict[str, int]  = {"hour": list(map(int,((soup.find('span', {"class": "sunset"}).text).split(":"))))[0],
-          "minute": list(map(int,((soup.find('span', {"class": "sunset"}).text).split(":"))))[1]}
+if args.nautical:
+    sunrise = datetime.datetime.strptime(json["results"]["nautical_twilight_begin"][:-6]+'+0000', '%Y-%m-%dT%H:%M:%S%z').astimezone(get_localzone())
+elif args.civil:
+    sunrise = datetime.datetime.strptime(json["results"]["civil_twilight_begin"][:-6]+'+0000', '%Y-%m-%dT%H:%M:%S%z').astimezone(get_localzone())
+else:
+    sunrise = datetime.datetime.strptime(json["results"]["sunrise"][:-6]+'+0000', '%Y-%m-%dT%H:%M:%S%z').astimezone(get_localzone())
 
 # Clear current crond config
 open("/etc/cron.d/tradfri-lightcontrol", 'w').close()
@@ -54,14 +109,14 @@ open("/etc/cron.d/tradfri-lightcontrol", 'w').close()
 f = open("/etc/cron.d/tradfri-lightcontrol", "a")
 logging.info('Timedelta %d hours and %d minutes' %(args.deltahours,args.deltaminutes))
 # Turn on lights with one hour delay
-date = datetime.datetime.now().replace(hour=sunset['hour'], minute=sunset['minute']) + timedelta(hours=args.deltahours,minutes=args.deltaminutes)
-logging.info('Updating sunset %s:%s time, real sunset at %s:%s' %(date.hour,date.minute,sunset['hour'],sunset['minute']))
-data = "%s %s * * * root /usr/bin/python3 /home/tradfri/tradfri-lightcontrol.py %s -S ON\n" %(date.minute,date.hour,host)
+sunsetdelta = sunset + timedelta(hours=args.deltahours,minutes=args.deltaminutes)
+logging.info('Updating sunset %s:%s time, real sunset at %s:%s' %(sunsetdelta.hour,sunsetdelta.minute,sunset.hour,sunset.minute))
+data = "%s %s * * * root /usr/bin/python3 /home/tradfri/tradfri-lightcontrol.py %s -S ON\n" %(sunsetdelta.minute,sunsetdelta.hour,host)
 f.write(data)
 # Turn off lights one hour early
-date = datetime.datetime.now().replace(hour=sunrise['hour'], minute=sunrise['minute']) - timedelta(hours=args.deltahours,minutes=args.deltaminutes)
-logging.info('Updating sunrise %s:%s, real sunrise at %s:%s' %(date.hour,date.minute,sunrise['hour'],sunrise['minute']))
-data = "%s %s * * * root /usr/bin/python3 /home/tradfri/tradfri-lightcontrol.py %s -S OFF\n" %(date.minute,date.hour,host)
+sunrisedelta = sunrise - timedelta(hours=args.deltahours,minutes=args.deltaminutes)
+logging.info('Updating sunrise %s:%s, real sunrise at %s:%s' %(sunrisedelta.hour,sunrisedelta.minute,sunrise.hour,sunrise.minute))
+data = "%s %s * * * root /usr/bin/python3 /home/tradfri/tradfri-lightcontrol.py %s -S OFF\n" %(sunrisedelta.minute,sunrisedelta.hour,host)
 f.write(data)
 # Close file handler
 f.close()
